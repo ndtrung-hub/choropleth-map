@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Choropleth Map</title>
+    <link rel="stylesheet" type="text/css" href="./css/index.css" />
+    <script src="//d3js.org/d3.v4.min.js" charset="utf-8"></script>
+    <script src="//d3js.org/topojson.v3.min.js"></script>
+    <script
+      type="text/javascript"
+      src="https://cdn.freecodecamp.org/testable-projects-fcc/v1/bundle.js"
+      defer
+    ></script>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root">
+      <div class="container" id="title-container">
+        <h1 id="title">Education</h1>
+        <h2 id="description">This is a description</h2>
+      </div>
+      <div class="container" id="graph-container"></div>
+      <div class="container" id="source">
+        Source:
+        <a
+          href="https://www.ers.usda.gov/data-products/county-level-data-sets/download-data.aspx"
+          >USDA Economic Research Service</a
+        >
+      </div>
+    </div>
+    <script type="text/javascript">
+      const DATA_URL = [
+        "https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/for_user_education.json",
+        "https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/counties.json",
+        "https://unpkg.com/world-atlas@1.1.4/world/110m.json",
+      ];
+
+      const cWSvg = 1300,
+        cHSvg = 500,
+        cPaddingLeft = 120,
+        cPaddingBottom = 50;
+
+      const graph = d3
+        .select("#graph-container")
+        .append("svg")
+        .attr("width", cWSvg + cPaddingLeft + 100)
+        .attr("height", cHSvg + cPaddingBottom + 80)
+        .attr("id", "graph");
+
+      const cNumGrade = 7,
+        cColor = [
+          "blue",
+          "rgb(103, 103, 255)",
+          "rgb(164, 164, 224)",
+          "rgb(236, 209, 119)",
+          "rgb(236, 239, 119)",
+          "rgb(236, 142, 119)",
+          "rgb(245, 78, 36)",
+        ];
+
+      let vCountry,
+        vCountryData = [],
+        vEduData = [];
+
+      Promise.all([...DATA_URL].map((url) => fetch(url)))
+        .then((resp) => Promise.all(resp.map((r) => r.json())))
+        .then((result) => {
+          vCountryData = result[1];
+          vEduData = result[0];
+          fDrawGraph(vCountryData, vEduData);
+        })
+        .catch((error) => console.log(error));
+
+      function fDrawGraph(vCountry, vEducation) {
+        let projection = d3
+          .geoMercator()
+          .center([0, 50])
+          .scale(100)
+          .rotate([0, 0]);
+        var path = d3.geoPath();
+
+        let tooltip = d3.select("body").append("div").attr("id", "tooltip");
+
+        const cMaxEdu = Math.max.apply(
+          Math,
+          vEducation.map((item) => item.bachelorsOrHigher)
+        );
+        const cMinEdu = Math.min.apply(
+          Math,
+          vEducation.map((item) => item.bachelorsOrHigher)
+        );
+        const cScaleEdu = (cMaxEdu - cMinEdu) / cNumGrade;
+
+        const cLegendSize = 50;
+
+        graph
+          .append("g")
+          .attr("class", "counties")
+          .attr("transform", `translate(${cPaddingLeft - 50},0)`)
+          .selectAll("path")
+          .data(topojson.feature(vCountry, vCountry.objects.counties).features)
+          .enter()
+          .append("path")
+          .attr("class", "county")
+          .attr("d", path)
+          .attr("data-fips", (d, i) => {
+            return d.id;
+          })
+          .attr("data-education", (d, i) => {
+            var vResult = vEduData.filter(function (obj) {
+              return obj.fips === d.id;
+            });
+            return vResult[0].bachelorsOrHigher;
+          })
+          .attr("fill", (d) => {
+            var vResult = vEduData.filter(function (obj) {
+              return obj.fips === d.id;
+            });
+            return cColor[Math.floor(vResult[0].bachelorsOrHigher / cScaleEdu)];
+          })
+          .on("mouseover", (data) => {
+            tooltip
+              .transition()
+              .duration(100)
+              .style("opacity", 0.9)
+              .style("z-index", 1);
+            let tempId = data.id;
+            var vResult = vEduData.filter(function (obj) {
+              return obj.fips === data.id;
+            })[0];
+            tooltip
+              .attr("data-education", () => {
+                return vResult.bachelorsOrHigher;
+              })
+              .html(
+                `${vResult["area_name"]}, ${
+                  vResult["state"]
+                }<br>${vResult.bachelorsOrHigher.toFixed(1)}`
+              )
+              .style("left", (d) => {
+                return d3.event.pageX + 20 + "px";
+              })
+              .style("top", d3.event.pageY - 10 + "px")
+              .style("position", "relative")
+              .style("z-index", +2);
+          })
+          .on("mouseout", () => {
+            tooltip
+              .transition()
+              .duration(300)
+              .style("opacity", 0)
+              .style("z-index", -1);
+          });
+        const cYScale = d3
+          .scaleLinear()
+          .domain([cMinEdu, cMaxEdu])
+          .range([0, cLegendSize * cNumGrade]);
+
+        let cTickValues = [];
+        for (let i = 0; i <= cNumGrade; i++) {
+          cTickValues.push(cScaleEdu * i + cMinEdu);
+        }
+        const yAxis = d3.axisRight().scale(cYScale);
+        let legend = graph.append("g").attr("id", "legend");
+        legend
+          .call(yAxis.tickValues(cTickValues).tickFormat(d3.format(".1f")))
+          .attr("transform", `translate(${cWSvg - 50},150)`);
+        legend
+          .selectAll("rect")
+          .data(cColor)
+          .enter()
+          .append("rect")
+          .attr("x", -cLegendSize)
+          .attr("y", (d, i) => 0 + i * cLegendSize)
+          .attr("width", cLegendSize)
+          .attr("height", cLegendSize)
+          .attr("fill", (d, i) => cColor[i]);
+      }
+    </script>
+  </body>
+</html>
